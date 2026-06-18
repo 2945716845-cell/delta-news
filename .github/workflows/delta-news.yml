@@ -1,0 +1,20 @@
+name: 三角洲日报
+
+on:
+  schedule:
+    - cron: "0 2 * * *" # 北京时间 10:00
+  workflow_dispatch: # 手动触发
+
+jobs:
+  report:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install requests
+      - name: 搜资讯并推送到微信
+        env:
+          SERVER_KEY: ${{ secrets.SERVER_KEY }}
+        run: python .github/scripts/delta-news.py
