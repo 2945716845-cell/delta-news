@@ -16,8 +16,13 @@ def safe_fetch(url, headers=None, timeout=8, decode="utf-8"):
         return ""
 
 
+source_status = {}  # 记录每个源是否抓到数据
+
 def fetch_all_hotspots() -> list[str]:
+    global source_status
     items = []
+
+    before = len(items)
 
     # 1. B站搜索
     for kw in ["三角洲行动+更新+赛季","三角洲行动+新枪","三角洲行动+活动","三角洲行动+攻略"]:
@@ -31,35 +36,42 @@ def fetch_all_hotspots() -> list[str]:
                     if v.get("play",0)>300 and len(t)>8 and t not in items:
                         items.append(f"[B站] {t}")
             except: pass
+    source_status["B站"] = f"✅ {len([x for x in items if '[B站]' in x])}条"
 
     # 2. 17173
+    before = len(items)
     html = safe_fetch("https://news.17173.com/z/deltaforce/")
     for m in re.finditer(r'<a[^>]*?title="([^"]*)"[^>]*?>', html):
         t = m.group(1).strip()
         if len(t)>8 and "三角洲" in t and t not in items:
             items.append(f"[17173] {t}")
+    source_status["17173"] = f"✅ {len(items)-before}条" if len(items)>before else "❌ 未抓到"
 
-    # 3. 三角洲官网 df.qq.com
+    # 3. 三角洲官网
+    before = len(items)
     html = safe_fetch("https://df.qq.com/web202206/news.shtml")
     for m in re.finditer(r'<a[^>]*?title="([^"]*)"[^>]*?>', html):
         t = m.group(1).strip()
         if len(t)>4 and t not in items:
             items.append(f"[官网] {t}")
-    # 备选：公告页
     html2 = safe_fetch("https://df.qq.com/web202206/newslist.html?type=notice")
     for m in re.finditer(r'<a[^>]*?title="([^"]*)"[^>]*?>', html2):
         t = m.group(1).strip()
         if len(t)>4 and t not in items:
             items.append(f"[官网公告] {t}")
+    source_status["官网"] = f"✅ {len(items)-before}条" if len(items)>before else "❌ 未抓到"
 
-    # 4. 小红书搜索
+    # 4. 小红书
+    before = len(items)
     html = safe_fetch("https://www.xiaohongshu.com/search_result?keyword=三角洲行动&type=51")
     for m in re.finditer(r'"title":"([^"]*三角洲[^"]*)"', html):
         t = m.group(1).strip()
         if len(t)>8 and t not in items:
             items.append(f"[小红书] {t}")
+    source_status["小红书"] = f"✅ {len(items)-before}条" if len(items)>before else "❌ 未抓到"
 
-    # 5. 小黑盒 (xiaoheihe.cn)
+    # 5. 小黑盒
+    before = len(items)
     html = safe_fetch("https://api.xiaoheihe.cn/v3/bbs/app/community/feeds?community_id=deltaforce&limit=10")
     if html:
         try:
@@ -69,26 +81,30 @@ def fetch_all_hotspots() -> list[str]:
                 if len(t)>8 and t not in items:
                     items.append(f"[小黑盒] {t}")
         except: pass
-    # 小黑盒网页备选
     html2 = safe_fetch("https://www.xiaoheihe.cn/community/board/deltaforce")
     for m in re.finditer(r'<a[^>]*?title="([^"]*)"[^>]*?>', html2):
         t = m.group(1).strip()
         if len(t)>6 and t not in items:
             items.append(f"[小黑盒] {t}")
+    source_status["小黑盒"] = f"✅ {len(items)-before}条" if len(items)>before else "❌ 未抓到"
 
-    # 6. 快手搜索
+    # 6. 快手
+    before = len(items)
     html = safe_fetch("https://www.kuaishou.com/search/video?searchKey=三角洲行动")
     for m in re.finditer(r'"caption":"([^"]*三角洲[^"]*)"', html):
         t = m.group(1).strip()
         if len(t)>8 and t not in items:
             items.append(f"[快手] {t}")
+    source_status["快手"] = f"✅ {len(items)-before}条" if len(items)>before else "❌ 未抓到"
 
-    # 7. 抖音搜索
+    # 7. 抖音
+    before = len(items)
     html = safe_fetch("https://www.douyin.com/search/三角洲行动?type=video")
     for m in re.finditer(r'"desc":"([^"]*)"', html):
         t = m.group(1).strip()
         if len(t)>8 and "三角洲" in t and t not in items:
             items.append(f"[抖音] {t}")
+    source_status["抖音"] = f"✅ {len(items)-before}条" if len(items)>before else "❌ 未抓到"
 
     return items[:15]
 
@@ -144,4 +160,7 @@ titles = fetch_all_hotspots()
 if not titles:
     titles = ["今日暂未抓取到热门资讯"]
 analysis = ai_analyze(titles)
-send_wechat(f"🎯 三角洲日报 | {today}", analysis)
+
+# 追加来源状态
+src_report = "\n\n---\n📡 **数据来源**：" + " | ".join(f"{k} {v}" for k, v in source_status.items())
+send_wechat(f"🎯 三角洲日报 | {today}", analysis + src_report)
