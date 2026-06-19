@@ -17,4 +17,5 @@ jobs:
       - name: 搜资讯并推送到微信
         env:
           SERVER_KEY: ${{ secrets.SERVER_KEY }}
+          DEEPSEEK_KEY: ${{ secrets.DEEPSEEK_KEY }}
         run: python .github/scripts/delta-news.py
