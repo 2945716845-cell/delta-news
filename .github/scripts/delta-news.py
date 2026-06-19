@@ -1,4 +1,4 @@
-"""三角洲日报 — 搜资讯 → DeepSeek AI分析 → 微信推送"""
+"""三角洲日报 — 从官网+资讯站抓更新 → DeepSeek AI分析 → 微信"""
 import os, json, urllib.request, datetime, re
 
 SERVER_KEY = os.environ["SERVER_KEY"]
@@ -6,34 +6,61 @@ DEEPSEEK_KEY = os.environ["DEEPSEEK_KEY"]
 today = datetime.date.today().strftime("%m月%d日")
 
 
-def fetch_all_titles() -> list[str]:
-    """从多个来源抓三角洲相关标题"""
+def fetch_all_news() -> list[str]:
     items = []
 
-    # B站搜索API
+    # 1. 国服官网公告
+    try:
+        req = urllib.request.Request("https://df.qq.com/web202206/news.html",
+            headers={"User-Agent": "Mozilla/5.0"})
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            html = resp.read().decode("utf-8", errors="ignore")
+            # 提取公告标题
+            for m in re.finditer(r'<a[^>]*?title="([^"]*)"[^>]*?>', html):
+                title = m.group(1).strip()
+                if len(title) > 6 and title not in items:
+                    items.append(f"[官网公告] {title}")
+    except Exception:
+        pass
+
+    # 2. 17173 三角洲专区
+    try:
+        for kw in ["三角洲行动", "deltaforce"]:
+            url = f"https://search.17173.com/s?q={urllib.request.quote(kw)}&type=news&from=deltaforce"
+            req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                html = resp.read().decode("utf-8", errors="ignore")
+                for m in re.finditer(r'<a[^>]*?title="([^"]*三角洲[^"]*)"[^>]*?>', html):
+                    title = m.group(1).strip()
+                    if len(title) > 8 and title not in items:
+                        items.append(f"[17173] {title}")
+    except Exception:
+        pass
+
+    # 3. 360游戏 三角洲频道
+    try:
+        url = "https://360game.360.cn/article/list?keyword=三角洲行动"
+        req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            html = resp.read().decode("utf-8", errors="ignore")
+            for m in re.finditer(r'<a[^>]*?title="([^"]*[三角洲|更新|赛季|枪械|版本][^"]*)"[^>]*?>', html):
+                title = m.group(1).strip()
+                if len(title) > 8 and title not in items:
+                    items.append(f"[360游戏] {title}")
+    except Exception:
+        pass
+
+    # 4. B站搜最新（备选）
     try:
         url = "https://api.bilibili.com/x/web-interface/search/type?search_type=video&keyword=三角洲行动+更新+赛季&order=pubdate"
         req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0", "Referer": "https://www.bilibili.com"})
         with urllib.request.urlopen(req, timeout=10) as resp:
             data = json.loads(resp.read())
-            for v in data.get("data", {}).get("result", [])[:8]:
+            for v in data.get("data", {}).get("result", [])[:5]:
                 title = re.sub(r'<[^>]+>', '', v.get("title", ""))
                 play = v.get("play", 0)
-                if play > 500 and len(title) > 8 and title not in items:
-                    items.append(title)
-    except Exception:
-        pass
-
-    # 抖音热搜关键词（用B站备选）
-    try:
-        url2 = "https://api.bilibili.com/x/web-interface/search/type?search_type=video&keyword=三角洲行动+攻略+2026&order=pubdate"
-        req2 = urllib.request.Request(url2, headers={"User-Agent": "Mozilla/5.0", "Referer": "https://www.bilibili.com"})
-        with urllib.request.urlopen(req2, timeout=10) as resp:
-            data2 = json.loads(resp.read())
-            for v in data2.get("data", {}).get("result", [])[:5]:
-                title = re.sub(r'<[^>]+>', '', v.get("title", ""))
-                if len(title) > 8 and title not in items:
-                    items.append(title)
+                if play > 1000 and len(title) > 8 and title not in items:
+                    items.append(f"[B站] {title}（{play}播放）")
     except Exception:
         pass
 
@@ -41,17 +68,14 @@ def fetch_all_titles() -> list[str]:
 
 
 def ai_analyze(titles: list[str]) -> str:
-    """送 DeepSeek 分析总结"""
-    prompt = f"""今天是{today}。以下是关于《三角洲行动》游戏的最新视频标题/资讯：
+    prompt = f"""今天是{today}。以下是关于《三角洲行动》游戏从官网和游戏资讯站抓取的最新内容：
 
 {chr(10).join(f'- {t}' for t in titles)}
 
-请你作为三角洲行动游戏分析师，从这些标题中提炼出今天最重要的3-5条资讯，用简洁中文总结。
+请作为三角洲行动游戏分析师，提炼今天最重要的3-5条资讯，用简洁中文总结。
 每条格式：**资讯标题** + 一句话分析。
-如果标题显示有版本更新、枪械调整、赛季变动、新活动等内容，重点标注。
-最后加一行：每日10:00自动推送。
-
-总字数控制在500字以内。"""
+重点标注：版本更新、枪械调整、赛季变动、新活动、新武器。
+总字数控制在500字以内。最后加一行「每日10:00自动推送」"""
 
     body = json.dumps({
         "model": "deepseek-chat",
@@ -78,13 +102,12 @@ def send_wechat(title, content):
 
 # 主逻辑
 try:
-    titles = fetch_all_titles()
+    titles = fetch_all_news()
     if titles:
         analysis = ai_analyze(titles)
         send_wechat(f"🎯 三角洲日报 | {today}", analysis)
     else:
         send_wechat(f"🎯 三角洲日报 | {today}",
-            f"今日暂未抓取到资讯。\n\n> [抖音搜最新内容](https://www.douyin.com/search/三角洲行动)")
+            f"今日暂未抓取到资讯。\n\n> 手动查看 [官网](https://df.qq.com) | [17173](https://news.17173.com/z/deltaforce/)")
 except Exception as e:
-    send_wechat(f"🎯 三角洲日报 | {today}",
-        f"日报生成失败：{str(e)[:100]}\n\n> [手动查看](https://www.douyin.com/search/三角洲行动)")
+    send_wechat(f"🎯 三角洲日报 | {today}", f"日报异常：{str(e)[:100]}")
