@@ -2,7 +2,7 @@ name: 三角洲日报
 
 on:
   schedule:
-    - cron: "0 2 * * *" # 北京时间 10:00
+    - cron: "0 0 * * *" # 北京时间 08:00
   workflow_dispatch: # 手动触发
 
 jobs:
