@@ -22,41 +22,63 @@ def fetch_all_hotspots() -> list[str]:
     global source_status
     items = []
 
-    # === 主源：newsnow API（多平台聚合，TrendRadar同款）===
-    sources = {"douyin": "抖音", "kuaishou": "快手", "bilibili-hot-search": "B站热搜",
-               "toutiao": "今日头条", "baidu": "百度", "zhihu": "知乎", "weibo": "微博"}
-    for sid, sname in sources.items():
-        before = len(items)
-        html = safe_fetch(f"https://newsnow.busiyi.world/api/s?id={sid}&latest=10&limit=5")
-        if html:
-            try:
-                data = json.loads(html)
-                news_list = data.get("items", data.get("data", {}).get("items", []))
-                for v in news_list[:3]:
-                    t = v.get("title", "") or v.get("name", "")
-                    t = re.sub(r'<[^>]+>', '', t).strip()
-                    if len(t) > 4 and t not in items and any(kw in t for kw in ["三角洲", "枪", "改枪", "大坝", "行政", "赛季"]):
-                        items.append(f"[{sname}] {t}")
-            except:
-                pass
-        source_status[sname] = f"✅ {len(items) - before}条" if len(items) > before else "❌"
-
-    # === 备选：B站 API 直搜 ===
+    # === 1. B站 API — 标题 + 描述 ===
     before = len(items)
     for kw in ["三角洲行动+更新", "三角洲行动+新赛季", "三角洲行动+新枪", "三角洲行动+改枪",
-               "三角洲行动+活动", "三角洲行动+攻略", "三角洲行动+点位", "三角洲行动+大坝"]:
+               "三角洲行动+活动", "三角洲行动+攻略", "三角洲行动+点位"]:
         html = safe_fetch(
             f"https://api.bilibili.com/x/web-interface/search/type?search_type=video&keyword={kw}&order=pubdate",
             {**UA, "Referer": "https://www.bilibili.com"})
         if html:
             try:
-                for v in json.loads(html).get("data", {}).get("result", [])[:3]:
+                for v in json.loads(html).get("data", {}).get("result", [])[:4]:
                     t = re.sub(r'<[^>]+>', '', v.get("title", ""))
-                    if v.get("play", 0) > 300 and len(t) > 8 and t not in items:
-                        items.append(f"[B站] {t}")
+                    desc = re.sub(r'<[^>]+>', '', v.get("description", "") or "")[:200]
+                    play = v.get("play", 0)
+                    if play > 300 and len(t) > 8 and t not in items:
+                        full = f"[B站 {play}播放] {t}"
+                        if desc:
+                            full += f" | 简介: {desc}"
+                        items.append(full)
             except:
                 pass
-    source_status["B站直搜"] = f"✅ {len(items) - before}条" if len(items) > before else "❌"
+    source_status["B站"] = f"✅ {len(items) - before}条全文" if len(items) > before else "❌"
+
+    # === 2. 17173 RSS — 全文 ===
+    before = len(items)
+    html = safe_fetch("https://news.17173.com/z/deltaforce/", timeout=12)
+    for m in re.finditer(r'<a[^>]*?title="([^"]*)"[^>]*?>', html):
+        t = m.group(1).strip()
+        # 尝试抓对应文章全文
+        href_match = re.search(r'href="([^"]*)"', m.group(0))
+        if href_match:
+            article_html = safe_fetch(href_match.group(1), timeout=8)
+            body = re.sub(r'<[^>]+>', '', article_html)[:400] if article_html else ""
+        else:
+            body = ""
+        if len(t) > 6 and t not in items and "三角洲" in t:
+            full = f"[17173] {t}"
+            if body:
+                full += f" | {body[:250]}"
+            items.append(full)
+    source_status["17173全文"] = f"✅ {len(items) - before}条" if len(items) > before else "❌"
+
+    # === 3. df.qq.com 公告 ===
+    before = len(items)
+    html = safe_fetch("https://df.qq.com/web202206/news.shtml", timeout=12)
+    for m in re.finditer(r'<a[^>]*?title="([^"]*)"[^>]*?>', html):
+        t = m.group(1).strip()
+        if len(t) > 4 and t not in items:
+            href_match = re.search(r'href="([^"]*)"', m.group(0))
+            body = ""
+            if href_match:
+                a_html = safe_fetch("https://df.qq.com" + href_match.group(1), timeout=8)
+                body = re.sub(r'<[^>]+>', '', a_html)[:300] if a_html else ""
+            full = f"[官网] {t}"
+            if body:
+                full += f" | {body[:250]}"
+            items.append(full)
+    source_status["官网全文"] = f"✅ {len(items) - before}条" if len(items) > before else "❌"
 
     return items[:15]
 
